@@ -1,0 +1,542 @@
+require("dotenv").config()
+const jwt = require("jsonwebtoken")
+const bcrypt = require("bcrypt")
+const sanitizeHTML = require('sanitize-html')
+const express = require("express")
+const cookieParser = require("cookie-parser")
+const path = require("path")
+const { error } = require("console")
+const db = require("better-sqlite3")("web.db")
+db.pragma("journal_mod = WAL")
+const app = express()
+
+// database setup her 
+const createTables = db.transaction(() => {
+    db.prepare(`
+    CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE NOT NULL,
+    email TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    full_name TEXT NOT NULL,
+    is_admin INTEGER DEFAULT 0, -- 0 false, 1 true
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );`).run()
+
+    db.prepare(`
+    CREATE TABLE IF NOT EXISTS books (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    author TEXT NOT NULL,
+    description TEXT,
+    isbn TEXT UNIQUE,
+    quantity INTEGER DEFAULT 0,
+    available_quantity INTEGER DEFAULT 0,
+    image_url TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    CHECK (quantity >= 0),
+    CHECK (available_quantity >= 0),
+    CHECK (available_quantity <= quantity)
+    ); `).run()   
+    db.prepare(`
+    CREATE TRIGGER IF NOT EXISTS books_updated_at
+        AFTER UPDATE ON books
+        FOR EACH ROW
+        BEGIN
+            UPDATE books SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+    END;`).run()
+    db.prepare(`
+    CREATE TABLE IF NOT EXISTS reservations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    book_id INTEGER NOT NULL,
+    status TEXT DEFAULT 'pending',
+    reservation_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    admin_notes TEXT,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE,
+    CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled'))
+    );`).run()
+    db.prepare(`
+    CREATE TRIGGER IF NOT EXISTS reservations_updated_at
+    AFTER UPDATE ON reservations
+    FOR EACH ROW
+    BEGIN
+        UPDATE reservations SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+    END;
+
+    `).run()
+})
+
+createTables()
+
+
+
+
+// database end setup 
+
+
+
+
+
+app.engine('html', require('ejs').renderFile);
+app.set('view engine', 'html');
+app.set('views', path.join(__dirname, "views"))
+app.use(express.static(path.join(__dirname, "public")))
+app.use(express.urlencoded({extended: true}))
+app.use(express.json());
+app.use(cookieParser())
+
+app.use(function (req , res , next){
+    res.locals.errors = []
+
+    // decode income the coocke
+    try{
+        const decoded = jwt.verify(req.cookies.webisTheBest , process.env.JWTSSS)
+        req.user = decoded 
+    }catch(err){
+        req.user = false
+    }
+
+    res.locals.user = req.user
+    console.log(req.user)
+
+    next()
+})
+
+app.get("/Who_I_am" , (req , res ) => {
+    if (!req.user){
+        return res.json({ IS : false });
+    }
+    res.json({ IS : true });
+
+})
+app.get("/IS_I_am_Good" , (req , res ) => {
+    const sqlstatment = db.prepare("SELECT is_admin FROM users WHERE id = ?")
+    const is_admin = sqlstatment.get(req.user.userid)
+    if (!is_admin == 1){
+        return res.json({ IS: false });
+    }
+    res.json({ IS: true });
+})
+function logIN(req , res , next){
+    if (!req.user){
+        return res.redirect("/")
+    }
+    next()
+}
+
+function IamAdmin (req , res ,next){
+    const sqlstatment = db.prepare("SELECT is_admin FROM users WHERE id = ?")
+    const is_admin = sqlstatment.get(req.user.userid)
+    if (!is_admin == 1){
+        return res.redirect("/")
+    }
+    next()    
+}
+
+app.get("/" , (req , res) => {
+    res.render("index")
+
+})
+app.get("/login" , (req , res) => {
+    if (req.user){
+        return res.render("books")
+    }
+    res.render("login")
+})
+app.get("/books" , (req , res) => {
+    res.render("books")
+})
+app.get("/my-reservations",  logIN , (req , res) => {
+    res.render("my-reservations")
+})
+app.get("/admin", logIN , IamAdmin , (req , res) => {
+    res.render("admin")
+})
+app.get("/register" , (req , res) => {
+    if (req.user){
+        return res.render("books")
+    }
+    res.render("register")
+})
+app.get("/logout" , (req , res) => {
+    res.clearCookie("webisTheBest")
+    res.redirect("/")
+})
+
+
+app.post("/login" , (req , res) => {
+
+    let errors = []
+    if (typeof req.body.username !== "string") req.body.username = ""
+    if (typeof req.body.password !== "string") req.body.password = ""
+    
+
+    if (req.body.username.trim() == "") errors = ["invalid password OR username "]
+    if (req.body.password == "") errors = ["invalid password OR username "]
+
+    if (errors.length) {
+        return res.status(400).json({ errors })
+    }
+
+    const sqlStatmentToGetINFO = db.prepare("SELECT * FROM users WHERE username = ?")
+    const TheRseultFROMsql = sqlStatmentToGetINFO.get(req.body.username)
+
+    if (!TheRseultFROMsql) {
+        errors = ["invalid password OR username "]
+        return res.status(400).json({ errors })
+    }
+
+    const isSamePassword = bcrypt.compareSync(req.body.password , TheRseultFROMsql.password_hash)
+    if (!isSamePassword){
+        errors = ["invalid password OR username "]
+        return res.status(400).json({ errors })
+    }
+
+    // givem the cookies and go the home page
+
+    const bigValueToken = jwt.sign( {exp: Math.floor(Date.now() / 1000) + 60 * 24 * 60 ,userid: TheRseultFROMsql.id , username: TheRseultFROMsql.username} , process.env.JWTSSS)
+    
+    res.cookie("webisTheBest" , bigValueToken , {
+        httpOnly: true,
+        secure: true,
+        sameSite: "strict" ,// defunce with CSRF attack
+        maxAge: 1000 * 60 * 60 *24
+    })
+
+
+    res.json({ success: true, message: "Registration successful" });
+})
+
+app.post("/register" , (req , res) => {
+    
+    // the viladetion 
+    const errors = []
+    if (typeof req.body.username !== "string") req.body.username = ""
+    if (typeof req.body.password !== "string") req.body.password = ""
+    if (typeof req.body.email !== "string") req.body.email = ""
+    if (typeof req.body.full_name !== "string") req.body.full_name = ""
+
+    req.body.username = req.body.username.trim()
+    req.body.email = req.body.email.trim()
+    req.body.full_name = req.body.full_name.trim()
+
+    if (!req.body.username) errors.push("You must provind a username ")
+    if (req.body.username && req.body.username.length < 3) errors.push("Username must be at least 3 char")
+    if (req.body.username && req.body.username.length > 15) errors.push("Username canot be uper then 15 char")
+    if (req.body.username && !req.body.username.match(/^[a-zA-z0-9]+$/)) errors.push("Username can noly later or number")
+    if (req.body.email && !req.body.email.match(/^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$/)) errors.push("email error")
+
+    req.body.email = sanitizeHTML(req.body.email , {allowedTags: [] , allowedAttributes: {}} )
+    req.body.username = sanitizeHTML(req.body.username , {allowedTags: [] , allowedAttributes: {}} )
+    req.body.full_name = sanitizeHTML(req.body.full_name , {allowedTags: [] , allowedAttributes: {}} )
+    req.body.password = sanitizeHTML(req.body.password.trim() , {allowedTags: [] , allowedAttributes: {}} )
+
+
+
+    // check if the user name is in the data base 
+    const usernmaeStatment = db.prepare("SELECT * FROM users WHERE username = ?") // here you must can not the user add SQL parameter 
+    const isInthedatabase = usernmaeStatment.get(req.body.username)
+    if (isInthedatabase){
+        errors.push("the user name is taken ")
+        return res.status(400).json({ errors })
+    }
+
+    if (!req.body.password) errors.push("You must provind a password ")
+    if (req.body.password && req.body.password.length < 6) errors.push("password must be at least 6 char")
+    if (req.body.password && req.body.password.length > 100) errors.push("password canot be uper then 100 char")
+    
+    if (errors.length) {
+        return res.status(400).json({ errors })
+    }
+
+    //hash the password 
+    const salt = bcrypt.genSaltSync(10)
+    req.body.password = bcrypt.hashSync(req.body.password , salt)
+
+    //save the user into DB
+    const insertData = db.prepare("INSERT INTO users (username , email , password_hash , full_name ) VALUES ( ? , ? , ? , ? )" )
+    const RESULT = insertData.run(req.body.username , req.body.email , req.body.password , req.body.full_name)
+
+    const statment = db.prepare("SELECT * FROM users WHERE ROWID = ?")
+    const user = statment.get(RESULT.lastInsertRowid)
+
+
+    //login the user and giving the cookie
+    const bigValueToken = jwt.sign( {exp: Math.floor(Date.now() / 1000) + 60 * 24 * 60 ,userid: user.id , username: user.username} , process.env.JWTSSS)
+    
+    res.cookie("webisTheBest" , bigValueToken , {
+        httpOnly: true,
+        secure: true,
+        sameSite: "strict" ,// defunce with CSRF attack
+        maxAge: 1000 * 60 * 60 *24
+    })
+
+
+    res.json({ success: true, message: "Registration successful" });
+    
+})
+
+app.get("/get_all_book" , (req , res) => {
+    const sqlstatmentTogetallbook = db.prepare("SELECT * FROM books ORDER BY created_at DESC")
+    const result = sqlstatmentTogetallbook.all()
+    res.json({ success: true, data: { books: result } })
+})
+
+function ValidationBook (req){
+    const errors = []
+
+    if (typeof req.body.title !== "string") req.body.title = ""
+    if (typeof req.body.author !== "string") req.body.author = ""
+    if (typeof req.body.isbn !== "string") req.body.isbn = ""
+    if (typeof req.body.description !== "string") req.body.description = ""
+    if (typeof req.body.image_url !== "string") req.body.image_url = ""
+    if (typeof req.body.quantity !== "number") req.body.quantity = 0
+
+    // trim - sanitize html 
+    req.body.title = sanitizeHTML(req.body.title.trim() , {allowedTags: [] , allowedAttributes: {}} )
+    req.body.author = sanitizeHTML(req.body.author.trim() , {allowedTags: [] , allowedAttributes: {}} )
+    req.body.isbn = sanitizeHTML(req.body.isbn.trim() , {allowedTags: [] , allowedAttributes: {}} )
+    req.body.description = sanitizeHTML(req.body.description.trim() , {allowedTags: [] , allowedAttributes: {}} )
+    req.body.image_url = sanitizeHTML(req.body.image_url.trim() , {allowedTags: [] , allowedAttributes: {}} )
+
+    if (!req.body.title) errors.push("you must add title ")
+    if (!req.body.author) errors.push("you must add author ")
+    if (!req.body.description) errors.push("you must add description ")
+    if (!req.body.isbn) errors.push("you must add isbn ")
+    if (req.body.quantity <= 0) errors.push("you must add quantity ")
+
+    return errors
+
+}
+app.post("/create_book", logIN , IamAdmin , (req , res) =>{
+    const errors =  ValidationBook(req)
+
+    if(errors.length){
+        return res.status(400).json({ errors })
+    }
+
+    // save in databeas 
+    const sqlstatmenttoaddbook = db.prepare("INSERT INTO books (title , author , isbn ,  description , image_url , quantity , available_quantity ) VALUES ( ? , ? , ? , ? , ? , ? , ? )")
+    const result = sqlstatmenttoaddbook.run(req.body.title , req.body.author , req.body.isbn , req.body.description , req.body.image_url , req.body.quantity , req.body.quantity)
+
+    res.json({ success: true, message: "Add successful" });
+})
+app.get("/getbookbyID:id" , (req , res) =>{
+    // return the info of the book 
+
+    const sqlstatment_return_info_of_book = db.prepare("SELECT * FROM books WHERE id = ?")
+    const result_theinfo_of_book = sqlstatment_return_info_of_book.get(req.params.id)
+    if(!result_theinfo_of_book){
+        const errors = "not found the book"
+        return res.status(400).json({ errors })
+    }
+
+    res.json({data: result_theinfo_of_book });
+})
+app.get("/search_book:query" , (req , res) =>{
+    // return the info of the book 
+    const errors = []
+    if (typeof req.params.query !== "string") req.params.query = ""
+    req.params.query = sanitizeHTML(req.params.query.trim() , {allowedTags: [] , allowedAttributes: {}} )
+    if (!req.params.query) errors.push("you must add query ")
+
+    const sqlstatment_return_info_of_book = db.prepare("SELECT * FROM books WHERE title LIKE ?")
+    const result_theinfo_of_book = sqlstatment_return_info_of_book.all(`%${req.params.query}%`)
+    if(!result_theinfo_of_book)errors.push("not found the book")
+        
+    if(errors.length){
+        return res.status(400).json({ errors })
+    }
+
+    res.json({success: true , data: result_theinfo_of_book });
+
+})
+
+app.post("/update_book:id", logIN , IamAdmin , (req , res ) =>{
+    const errors =  ValidationBook(req)
+
+    if(errors.length){
+        return res.status(400).json({ errors })
+    }
+
+    // check if the book is in the DB 
+    const sqlstatment_return_info_of_book = db.prepare("SELECT * FROM books WHERE id = ?")
+    const result_theinfo_of_book = sqlstatment_return_info_of_book.get(req.params.id)
+    if(!result_theinfo_of_book){
+        const errors = "not found the book"
+        return res.status(400).json({ errors })
+    }
+
+    const updatesqlstatmentforinfoofbook = db.prepare("UPDATE books SET title = ? , author = ? , isbn = ? ,  description = ? , image_url = ? , quantity = ? , available_quantity = ? WHERE id = ?")
+    updatesqlstatmentforinfoofbook.run( req.body.title , req.body.author , req.body.isbn , req.body.description , req.body.image_url , req.body.quantity , req.body.quantity ,  result_theinfo_of_book.id)
+
+   res.json({ success: true, message: "update successful" });
+
+})
+
+app.post("/update_value:id", logIN , IamAdmin  , (req , res) =>{
+    const errors = []
+
+    const sqlstatment_return_info_of_book = db.prepare("SELECT * FROM books WHERE id = ?")
+    const result_theinfo_of_book = sqlstatment_return_info_of_book.get(req.params.id)
+
+    if(!result_theinfo_of_book) errors.push("not found the book")
+    if (typeof req.body.quantity !== "number") req.body.quantity = 0
+    if (req.body.newQuantity <= 0) errors.push("you must add quantity ")
+    if (req.body.newQuantity > result_theinfo_of_book.quantity) errors.push("the spase is small")
+
+    if(errors.length){
+        return res.status(400).json({ errors })
+    }
+
+    const updatesqlstatmentforinfoofbook = db.prepare("UPDATE books SET  available_quantity = ? WHERE id = ?")
+    updatesqlstatmentforinfoofbook.run(  req.body.newQuantity ,  result_theinfo_of_book.id)
+
+    res.json({ success: true, message: "update successful" });
+})
+
+app.post("/delete_book:id" ,logIN , IamAdmin , (req , res) => {
+    const errors = []
+
+    const sqlstatment_return_info_of_book = db.prepare("SELECT * FROM books WHERE id = ?")
+    const result_theinfo_of_book = sqlstatment_return_info_of_book.get(req.params.id)
+
+    if(!result_theinfo_of_book) errors.push("not found the book")
+
+    if(errors.length){
+        return res.status(400).json({ errors })
+    }
+
+    const sqldeletstatment = db.prepare("DELETE FROM books WHERE id = ?")
+    sqldeletstatment.run(req.params.id)
+
+    res.json({ success: true, message: "delete successful" });
+
+})
+
+app.get("/get_all_reservations",logIN , IamAdmin , (req , res) =>{
+    const sqlstatmenttogetallreservations = db.prepare(`
+    SELECT 
+        reservations.id AS id,
+        reservations.book_id,
+        reservations.user_id,
+        reservations.reservation_date,
+        reservations.status,
+        reservations.admin_notes,
+
+        books.title AS title,
+        books.author AS author,
+
+        users.username AS username,
+        users.full_name AS full_name
+
+    FROM reservations
+    INNER JOIN books ON books.id = reservations.book_id
+    INNER JOIN users ON users.id = reservations.user_id
+    ORDER BY reservations.reservation_date DESC
+`)
+    const result = sqlstatmenttogetallreservations.all()
+    res.json({ success: true, data: { reservations: result} })
+})
+
+app.post("/update_reservations:id", (req , res )=> {
+    const errors = []
+
+    const sqlselectstatmentforreservations = db.prepare("SELECT * FROM reservations WHERE id = ?")
+    const result = sqlselectstatmentforreservations.get(req.params.id)
+
+    if(!result) errors.push("not found the reservations")
+
+
+    if(typeof req.body.status !== "string") req.body.status = ""
+    if(typeof req.body.notes !== "string") req.body.notes = ""
+
+    if (!req.body.status) errors.push("you must add status ")
+    if (!req.body.notes) errors.push("you must add notes ")
+
+    req.body.status = sanitizeHTML(req.body.status.trim() , {allowedTags: [] , allowedAttributes: {}} )
+    req.body.notes = sanitizeHTML(req.body.notes.trim() , {allowedTags: [] , allowedAttributes: {}} )
+
+    const allowed = ["pending", "approved", "rejected", "cancelled"];
+
+    if (!allowed.includes(req.body.status)) errors.push("the status must be one of this pending or approved or rejected or cancelled ")
+
+    if(errors.length){
+        return res.status(400).json({ errors })
+    }
+
+    const sqlupdatereservations = db.prepare("UPDATE reservations SET  admin_notes = ? , status = ? WHERE id = ?")
+    sqlupdatereservations.run(req.body.notes , req.body.status ,req.params.id)
+
+    res.json({ success: true, message: "update successful" });
+
+})
+
+app.post("/create_reservations", logIN , (req , res) => {
+    const errors = []
+
+    const sqlstatment_return_info_of_book = db.prepare("SELECT * FROM books WHERE id = ?")
+    const result_theinfo_of_book = sqlstatment_return_info_of_book.get(req.body.bookId)
+
+    if(!result_theinfo_of_book) errors.push("not found the book")
+
+    if(errors.length){
+        return res.status(400).json({ errors })
+    }
+
+    const sqlcreate_reservationsstatment = db.prepare("INSERT INTO reservations ( book_id , user_id ) VALUES (? , ?)")
+    sqlcreate_reservationsstatment.run(req.body.bookId , req.user.userid )
+
+    res.json({ success: true, message: "Add successful" });
+
+})
+
+app.get("/getmyreservations" , logIN , (req , res ) => {
+    const errors = []
+
+    const sqlstatment_return_info_of_book = db.prepare(`
+    SELECT 
+        reservations.id AS id,
+        reservations.book_id,
+        reservations.user_id,
+        reservations.reservation_date,
+        reservations.status,
+        reservations.admin_notes,
+
+        books.title AS title,
+        books.author AS author,
+
+        users.username AS username,
+        users.full_name AS full_name
+
+    FROM reservations
+    INNER JOIN books ON books.id = reservations.book_id
+    INNER JOIN users ON users.id = reservations.user_id
+    WHERE reservations.user_id = ?
+    ORDER BY reservations.reservation_date DESC
+`)
+    const result_theinfo_of_book = sqlstatment_return_info_of_book.all(req.user.userid)
+
+    if(!result_theinfo_of_book) errors.push("not found ")
+
+    if(errors.length){
+        return res.status(400).json({ errors })
+    }
+    res.json({ success: true, data: {result_theinfo_of_book} })
+
+})
+
+app.get("/delete_reservations:id" , logIN , (req,res) =>{
+
+    const sqldeletestatment = db.prepare("UPDATE reservations SET  status = 'cancelled' WHERE id = ?")
+    sqldeletestatment.run(req.params.id)
+    res.json({ success: true })
+})
+
+app.listen(3000)
+
+

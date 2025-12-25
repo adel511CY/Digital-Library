@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Digital Library</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <div class="header">
+        <h1>📚 Digital Library</h1>
+        <nav id="nav">
+            <!-- Will be filled by JavaScript -->
+        </nav>
+    </div>
+
+    <div class="container">
+        <div class="card" style="text-align: center;">
+            <h2>Welcome to Our Digital Library</h2>
+            <p style="font-size: 1.2rem; color: #666; margin: 2rem 0;">
+                Discover a world of knowledge and amazing books
+            </p>
+            
+            <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
+                <a href="/books" class="btn btn-primary" style="text-decoration: none;">
+                    Browse Books
+                </a>
+                <a href="/login" class="btn btn-secondary" id="loginBtn" style="text-decoration: none;">
+                    Login
+                </a>
+                <a href="/register" class="btn btn-success" id="registerBtn" style="text-decoration: none;">
+                    Register
+                </a>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3 style="margin-bottom: 1rem;">Library Features</h3>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 2rem; margin-top: 2rem;">
+                <div style="text-align: center;">
+                    <div style="font-size: 3rem; margin-bottom: 1rem;">📖</div>
+                    <h4>Vast Library</h4>
+                    <p style="color: #666;">Thousands of books in various fields</p>
+                </div>
+                <div style="text-align: center;">
+                    <div style="font-size: 3rem; margin-bottom: 1rem;">🔍</div>
+                    <h4>Easy Search</h4>
+                    <p style="color: #666;">Find your favorite book easily</p>
+                </div>
+                <div style="text-align: center;">
+                    <div style="font-size: 3rem; margin-bottom: 1rem;">📅</div>
+                    <h4>Instant Reservation</h4>
+                    <p style="color: #666;">Reserve your book with one click</p>
+                </div>
+                <div style="text-align: center;">
+                    <div style="font-size: 3rem; margin-bottom: 1rem;">🔒</div>
+                    <h4>Safe & Secure</h4>
+                    <p style="color: #666;">Your data is protected with highest security standards</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/js/config.js"></script>
+    <script>
+        // Update navigation based on login status
+        async function updateNav() {
+            const nav = document.getElementById('nav');
+            const loginBtn = document.getElementById('loginBtn');
+            const registerBtn = document.getElementById('registerBtn');
+
+
+            
+        try {
+            const response = await fetch("/Who_I_am" )
+            const response2 = await fetch("/IS_I_am_Good" )
+            const data2 = await response2.json();
+            const data = await response.json();
+            if (data.IS) {
+                nav.innerHTML = `
+                    <a href="/books">Books</a>
+                    <a href="/my-reservations">My Reservations</a>
+                    ${data2.IS ? '<a href="/admin">Admin Panel</a>' : ''}
+                    <a href="/logout" style="background: #f44336; color: white;">Logout</a>
+                `;
+                console.log(data2.IS)
+                loginBtn.style.display = 'none';
+                registerBtn.style.display = 'none';
+            } else {
+                nav.innerHTML = '<a href="/books">Books</a>';
+            }
+        } catch (err) {
+            showMessage("Server error", "error");
+        }
+
+
+        }
+
+        updateNav();
+    </script>
+</body>
+</html>

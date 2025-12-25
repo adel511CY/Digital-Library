@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Books - Library</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="header">
+        <h1>📚 Digital Library</h1>
+        <nav id="nav">
+            <a href="/">Home</a>
+            <a href="/books">Books</a>
+        </nav>
+    </div>
+
+    <div class="container">
+        <div class="card">
+            <h2>Available Books</h2>
+            
+            <div class="search-box">
+                <input type="text" id="searchInput" placeholder="Search for a book..." >
+                <button class="btn btn-primary" onclick="searchBooks()">Search</button>
+                <button class="btn btn-secondary" onclick="loadBooks()">Show All</button>
+            </div>
+        </div>
+
+        <div id="loading" class="loading">Loading books...</div>
+        <div id="booksContainer" class="books-grid" style="display: none;"></div>
+        <div id="emptyState" class="empty-state" style="display: none;">
+            <div style="font-size: 4rem;">📚</div>
+            <h3>No Books Found</h3>
+            <p>No books were found</p>
+        </div>
+    </div>
+
+    <!-- Book Details Modal -->
+    <div id="bookModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Book Details</h2>
+                <button class="modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div id="bookDetails"></div>
+        </div>
+    </div>
+
+    <script src="js/config.js"></script>
+    <script>
+        let currentBooks = [];
+
+        // Update navigation
+        async function updateNav() {
+            const nav = document.getElementById('nav');
+
+            try {
+            const response = await fetch("/Who_I_am" )
+            const response2 = await fetch("/IS_I_am_Good" )
+            const data2 = await response2.json();
+            const data = await response.json();
+            if (data.IS) {
+                nav.innerHTML = `
+                    <a href="/">Home</a>
+                    <a href="/books">Books</a>
+                    <a href="/my-reservations">My Reservations</a>
+                    ${data2.IS ? '<a href="/admin">Admin Panel</a>' : ''}
+                    <a href="/logout" style="background: #f44336; color: white;">Logout</a>
+                `;
+            }
+            } catch (err) {
+                showMessage("Server error", "error");
+            }
+        }
+
+        // Load books
+        async function loadBooks() {
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('booksContainer').style.display = 'none';
+            document.getElementById('emptyState').style.display = 'none';
+            
+            try {
+                // lode all the book
+                const response = await fetch("/get_all_book")
+                const data = await response.json()
+                displayBooks(data.data.books);
+            } catch (error) {
+                showMessage('Failed to load books', 'error');
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('emptyState').style.display = 'block';
+            }
+        }
+
+        // Search books
+        async function searchBooks() {
+            const query = document.getElementById('searchInput').value.trim();
+            
+            if (!query || query.length < 2) {
+                showMessage('Please enter a valid search term (at least 2 characters)', 'error');
+                return;
+            }
+            
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('booksContainer').style.display = 'none';
+            
+            try {
+                const response = await fetch(`/search_book${query}`);
+                const data = await response.json()
+                if (!response.ok) {
+                    // show errors
+                    data.errors.forEach(err => showMessage(err, "error"));
+                    return;
+                }
+                currentBooks = data.data;
+                displayBooks(currentBooks);
+            } catch (error) {
+                showMessage('Search failed', 'error');
+                document.getElementById('loading').style.display = 'none';
+            }
+        }
+
+        // Display books
+        async function displayBooks(books) {
+            document.getElementById('loading').style.display = 'none';
+            
+            const container = document.getElementById('booksContainer');
+            
+            if (!books || books.length === 0) {
+                document.getElementById('emptyState').style.display = 'block';
+                container.style.display = 'none';
+                return;
+            }
+            container.style.display = 'grid';
+            document.getElementById('emptyState').style.display = 'none';
+            
+            const response = await fetch("/Who_I_am" )
+            const data = await response.json();
+
+            container.innerHTML = books.map(book  => `
+                <div class="book-card">
+                
+                    <img src="${book.image_url}" 
+                         alt="${book.title}" 
+                        >
+                    <div class="book-card-content">
+                        <h3>${book.title}</h3>
+                        <p><strong>Author:</strong> ${book.author}</p>
+                        <p style="color: #666; font-size: 0.9rem;">${book.description ? book.description.substring(0, 100) + '...' : 'No description available'}</p>
+                        <span class="quantity ${book.available_quantity > 0 ? '' : 'out-of-stock'}">
+                            ${book.available_quantity > 0 ? `Available: ${book.available_quantity}` : 'Out of Stock'}
+                        </span>
+                        <div style="margin-top: 1rem; display: flex; gap: 10px;">
+                            <button class="btn btn-primary" onclick="showBookDetails(${book.id})" style="flex: 1;">
+                                Details
+                            </button>
+                            ${data.IS && book.available_quantity > 0 ? `
+                                <button class="btn btn-success" onclick="reserveBook(${book.id})" style="flex: 1;">
+                                    Reserve
+                                </button>
+                            ` : ''}
+                        </div>
+                    </div> 
+                </div>
+            `).join('');
+        }
+
+        // Show book details
+        async function showBookDetails(bookId) {
+            try {
+
+                const response1 = await fetch("/Who_I_am" )
+                const data1 = await response1.json();
+
+
+                const response = await fetch(`/getbookbyID${bookId}`)
+                const data = await response.json()
+                const book = data.data;
+                
+                document.getElementById('bookDetails').innerHTML = `
+                    <div style="text-align: center; margin-bottom: 2rem;">
+                        <img src="${book.image_url }" 
+                             style="max-width: 100%; height: auto; border-radius: 8px;
+                            >
+                    </div>
+                    <h3>${book.title}</h3>
+                    <p><strong>Author:</strong> ${book.author}</p>
+                    <p><strong>ISBN:</strong> ${book.isbn}</p>
+                    <p><strong>Description:</strong></p>
+                    <p style="color: #666; line-height: 1.8;">${book.description || 'No description available'}</p>
+                    <div style="margin-top: 1rem;">
+                        <span class="quantity ${book.available_quantity > 0 ? '' : 'out-of-stock'}">
+                            Available Quantity: ${book.available_quantity} of ${book.quantity}
+                        </span>
+                    </div>
+                    ${data1.IS && book.available_quantity > 0 ? `
+                        <button class="btn btn-success" onclick="reserveBook(${book.id}); closeModal();" style="width: 100%; margin-top: 1.5rem;">
+                            Reserve This Book
+                        </button>
+                    ` : ''}
+                `;
+                
+                document.getElementById('bookModal').classList.add('active');
+            } catch (error) {
+                showMessage('Failed to load book details', 'error');
+            }
+        }
+
+        // Reserve book
+        async function reserveBook(bookId) {
+            const response = await fetch("/Who_I_am" )
+            const data = await response.json();
+            if (!data.IS) {
+                showMessage('Please login first', 'error');
+                setTimeout(() => window.location.href = 'login.html', 1500);
+                return;
+            }
+            
+            try {
+                const result = await fetch("/create_reservations" , {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json"},
+                    body: JSON.stringify({bookId})
+                })
+                const data = await result.json()
+                if (!result.ok) {
+                    // show errors
+                    data.errors.forEach(err => showMessage(err, "error"));
+                    return;
+                }
+
+                
+                showMessage('Book reserved successfully!', 'success');
+                loadBooks(); // Reload books to update quantities
+                
+            } catch (error) {
+                showMessage(error.message || 'Failed to reserve book', 'error');
+            }
+        }
+
+        // Close modal
+        function closeModal() {
+            document.getElementById('bookModal').classList.remove('active');
+        }
+
+        // Search on Enter key
+        document.getElementById('searchInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                searchBooks();
+            }
+        });
+
+        // Close modal on outside click
+        document.getElementById('bookModal').addEventListener('click', (e) => {
+            if (e.target.id === 'bookModal') {
+                closeModal();
+            }
+        });
+
+        // Initial load
+        updateNav();
+        loadBooks();
+    </script>
+</body>
+</html>

@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Reservations - Library</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="header">
+        <h1>📚 Digital Library</h1>
+        <nav id="nav">
+            <a href="/index">Home</a>
+            <a href="/books">Books</a>
+            <a href="/my-reservations">My Reservations</a>
+        </nav>
+    </div>
+
+    <div class="container">
+        <div class="card">
+            <h2>My Reservations</h2>
+            <p style="color: #666; margin-bottom: 2rem;">
+                Here you can track all your reservations and check their status
+            </p>
+
+            <div id="loading" class="loading">Loading reservations...</div>
+            
+            <div id="reservationsContainer" style="display: none;">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Book</th>
+                            <th>Author</th>
+                            <th>Reservation Date</th>
+                            <th>Status</th>
+                            <th>Admin Notes</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="reservationsBody"></tbody>
+                </table>
+            </div>
+
+            <div id="emptyState" class="empty-state" style="display: none;">
+                <div style="font-size: 4rem;">📋</div>
+                <h3>No Reservations</h3>
+                <p>You haven't reserved any books yet</p>
+                <a href="books" class="btn btn-primary" style="margin-top: 1rem; text-decoration: none;">
+                    Browse Books
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/config.js"></script>
+    <script>
+        // Check if logged in
+            async function x(){
+            const response = await fetch("/Who_I_am" )
+            const data = await response.json();
+            if (!data.IS) {
+                showMessage('Please login first', 'error');
+                setTimeout(() => window.location.href = 'login.html', 1500);
+            }
+        }
+        x()
+
+
+        // Update navigation
+        async function updateNav() {
+            const nav = document.getElementById('nav');
+            const response2 = await fetch("/IS_I_am_Good" )
+            const data2 = await response2.json();
+            const user = data2.IS;
+            
+            nav.innerHTML = `
+                <a href="/index">Home</a>
+                <a href="/books">Books</a>
+                <a href="/my-reservations">My Reservations</a>
+                ${user ? '<a href="/admin">Admin Panel</a>' : ''}
+                <a href="/logout" style="background: #f44336; color: white;">Logout</a>
+            `;
+        }
+
+        // Load reservations
+        async function loadReservations() {
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('reservationsContainer').style.display = 'none';
+            document.getElementById('emptyState').style.display = 'none';
+            
+            try {
+                const resp = await fetch("/getmyreservations")
+                const reservations = await resp.json()
+
+                if (!resp.ok) {
+                    // show errors
+                    reservations.errors.forEach(err => showMessage(err, "error"));
+                    return;
+                }
+                console.log(reservations.data.result_theinfo_of_book)
+                displayReservations(reservations.data.result_theinfo_of_book);
+            } catch (error) {
+                showMessage('Failed to load reservations', 'error');
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('emptyState').style.display = 'block';
+            }
+        }
+
+        // Display reservations
+        function displayReservations(reservations) {
+            document.getElementById('loading').style.display = 'none';
+
+            if (!reservations || reservations.length === 0) {
+                document.getElementById('emptyState').style.display = 'block';
+                return;
+            }
+            
+            document.getElementById('reservationsContainer').style.display = 'block';
+
+            const tbody = document.getElementById('reservationsBody');
+            tbody.innerHTML = reservations.map((res, index) => `
+                <tr>
+                    <td>${index + 1}</td>
+                    <td>
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            ${res.image_url ? `
+                                <img src="${res.image_url}" 
+                                     style="width: 50px; height: 50px; object-fit: cover; border-radius: 5px;"
+                                     onerror="this.style.display='none'">
+                            ` : ''}
+                            <strong>${res.title}</strong>
+                        </div>
+                    </td>
+                    <td>${res.author}</td>
+                    <td>${new Date(res.reservation_date).toLocaleDateString('en-US')}</td>
+                    <td>
+                        <span class="status ${res.status}">
+                            ${getStatusText(res.status)}
+                        </span>
+                    </td>
+                    <td>${res.admin_notes || '-'}</td>
+                    <td>
+                        ${res.status === 'pending' ? `
+                            <button class="btn btn-danger" onclick="cancelReservation(${res.id})" style="padding: 6px 12px; font-size: 0.9rem;">
+                                Cancel
+                            </button>
+                        ` : '-'}
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        // Get status text
+        function getStatusText(status) {
+            const statusMap = {
+                'pending': 'Pending',
+                'approved': 'Approved',
+                'rejected': 'Rejected',
+                'cancelled': 'Cancelled'
+            };
+            return statusMap[status] || status;
+        }
+
+        // Cancel reservation
+        async function cancelReservation(reservationId) {
+            if (!confirm('Are you sure you want to cancel this reservation?')) {
+                return;
+            }
+            
+            try {
+                const response = fetch(`/delete_reservations${reservationId}`)
+                
+                if (response.success) {
+                    showMessage('Reservation cancelled successfully', 'success');
+                    loadReservations(); // Reload reservations
+                }
+            } catch (error) {
+                showMessage(error.message || 'Failed to cancel reservation', 'error');
+            }
+        }
+
+        // Initial load
+        updateNav();
+        loadReservations();
+    </script>
+</body>
+</html>
