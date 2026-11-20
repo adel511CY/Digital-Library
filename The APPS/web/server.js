@@ -114,9 +114,15 @@ app.get("/Who_I_am" , (req , res ) => {
 
 })
 app.get("/IS_I_am_Good" , (req , res ) => {
+    if (!req.user){
+        return res.json({ IS : false });
+    }
     const sqlstatment = db.prepare("SELECT is_admin FROM users WHERE id = ?")
     const is_admin = sqlstatment.get(req.user.userid)
-    if (!is_admin == 1){
+    if (!is_admin ){
+        return res.json({ IS: false });
+    }
+    if (is_admin.is_admin == 0 ){
         return res.json({ IS: false });
     }
     res.json({ IS: true });
@@ -131,10 +137,10 @@ function logIN(req , res , next){
 function IamAdmin (req , res ,next){
     const sqlstatment = db.prepare("SELECT is_admin FROM users WHERE id = ?")
     const is_admin = sqlstatment.get(req.user.userid)
-    if (!is_admin == 1){
+    if (is_admin.is_admin == 0){
         return res.redirect("/")
     }
-    next()    
+    next()      
 }
 
 app.get("/" , (req , res) => {
@@ -538,5 +544,4 @@ app.get("/delete_reservations:id" , logIN , (req,res) =>{
 })
 
 app.listen(3000)
-
 
